@@ -4,16 +4,23 @@ import math
 import pygame
 from os import listdir
 from os.path import isfile, join
+from pygame.font import Font
 pygame.init()
+pygame.mixer.init()
+pygame.font.init()
 
-pygame.display.set_caption("Platformer")
+pygame.display.set_caption("Python Platformer")
 
 WIDTH, HEIGHT = 900, 700
 FPS = 60
 PLAYER_VEL = 5
 
+player_health = 5
+
 window = pygame.display.set_mode((WIDTH, HEIGHT))
 
+pygame.mixer.music.load("Roa - Pixel Story.mp3")
+pygame.mixer.music.play(-1)
 
 def flip(sprites):
     return [pygame.transform.flip(sprite, True, False) for sprite in sprites]
@@ -21,6 +28,30 @@ def flip(sprites):
 
 def load_sprite_sheets(dir1, dir2, width, height, direction=False):
     path = join("assets", dir1, dir2)
+    images = [f for f in listdir(path) if isfile(join(path, f))]
+
+    all_sprites = {}
+
+    for image in images:
+        sprite_sheet = pygame.image.load(join(path, image)).convert_alpha()
+
+        sprites = []
+        for i in range(sprite_sheet.get_width() // width):
+            surface = pygame.Surface((width, height), pygame.SRCALPHA, 32)
+            rect = pygame.Rect(i * width, 0, width, height)
+            surface.blit(sprite_sheet, (0, 0), rect)
+            sprites.append(pygame.transform.scale2x(surface))
+        
+        if direction:
+            all_sprites[image.replace(".png", "") + "_right"] = sprites
+            all_sprites[image.replace(".png", "") + "_left"] = flip(sprites)
+        else:
+            all_sprites[image.replace(".png", "")] = sprites
+
+    return all_sprites
+
+def load_items(dir1, dir2, dir3, width, height, direction=False):
+    path = join("assets", dir1, dir2, dir3)
     images = [f for f in listdir(path) if isfile(join(path, f))]
 
     all_sprites = {}
@@ -73,6 +104,8 @@ class Player(pygame.sprite.Sprite):
         self.hit_count = 0
     
     def jump(self):
+        jump_sound = pygame.mixer.Sound('jump.wav')
+        jump_sound.play()
         self.y_vel = -self.GRAVITY * 8
         self.animation_count = 0
         self.jump_count += 1
@@ -84,8 +117,12 @@ class Player(pygame.sprite.Sprite):
         self.rect.y += dy
 
     def make_hit(self):
+        hit_sound = sound = pygame.mixer.Sound('hit.wav')
+        hit_sound.play()
         self.hit = True
         self.hit_count = 0
+        global player_health
+        #player_health -= 1
 
     def move_left(self, vel):
         self.x_vel = -vel
@@ -103,7 +140,7 @@ class Player(pygame.sprite.Sprite):
         self.y_vel += min(1, (self.fall_count / FPS) * self.GRAVITY)
         self.move(self.x_vel, self.y_vel)
 
-        if self.hit:
+        if self.hit:            
             self.hit_count += 1
         if self.hit_count > FPS * 2:
             self.hit = False
@@ -117,7 +154,7 @@ class Player(pygame.sprite.Sprite):
         self.y_vel = 0
         self.jump_count = 0
 
-    def hit_head(self):
+    def hit_head(self):        
         self.count = 0
         self.y_vel *= -1
 
@@ -164,14 +201,6 @@ class Object(pygame.sprite.Sprite):
         win.blit(self.image, (self.rect.x - offset_x, self.rect.y))
 
 
-class Block(Object):
-    def __init__(self, x, y, size):
-        super().__init__(x, y, size, size)
-        block = get_block(size)
-        self.image.blit(block, (0, 0))
-        self.mask = pygame.mask.from_surface(self.image)
-
-
 class Fire(Object):
     ANIMATION_DELAY = 3
     
@@ -201,6 +230,146 @@ class Fire(Object):
 
         if self.animation_count // self.ANIMATION_DELAY > len(sprites):
             self.animation_count = 0
+
+
+class Spikes(Object):
+    def __init__(self, x, y, width, height):
+        super().__init__(x, y, width, height, "spikes")
+        self.spikes = load_sprite_sheets("Traps", "Spikes", width, height)
+        self.image = self.spikes["Idle"][0]
+        self.mask = pygame.mask.from_surface(self.image)
+        self.animation_count = 0
+    
+    def loop(self):
+        sprites = self.spikes[self.animation_name]
+        sprite_index = (self.animation_count // 
+                        self.ANIMATION_DELAY) % len(sprites)
+        self.image = sprites[sprite_index]
+
+        self.rect = self.image.get_rect(topleft=(self.rect.x, self.rect.y))
+        self.mask = pygame.mask.from_surface(self.image)
+
+
+class Platform(Object):
+    ANIMATION_DELAY = 3
+    
+    def __init__(self, x, y, width, height):
+        super().__init__(x, y, width, height, "platform")
+        self.x_vel = 0
+        self.platform = load_sprite_sheets("Traps", "Falling Platforms", width, height)
+        self.image = self.platform["Off"][0]
+        self.mask = pygame.mask.from_surface(self.image)
+        self.animation_count = 0
+        self.animation_name = "Off"
+
+    def on(self):
+        self.animation_name = "On (32x10)"
+
+    def off(self):
+        self.animation_name = "Off"
+    
+    def loop(self):
+        sprites = self.platform[self.animation_name]
+        sprite_index = (self.animation_count // 
+                        self.ANIMATION_DELAY) % len(sprites)
+        self.image = sprites[sprite_index]
+        self.animation_count += 1
+
+        self.rect = self.image.get_rect(topleft=(self.rect.x, self.rect.y))
+        self.mask = pygame.mask.from_surface(self.image)
+
+        if self.animation_count // self.ANIMATION_DELAY > len(sprites):
+            self.animation_count = 0
+
+        if self.rect.x < 580 and self.x_vel != -1:
+            self.x_vel = 1
+        elif self.rect.x >= 1000:
+            self.x_vel = -1
+        elif self.rect.x < 576:
+            self.x_vel = 1
+        
+        self.rect.x += self.x_vel
+
+
+class Chain(Object):
+    ANIMATION_DELAY = 3
+    
+    def __init__(self, x, y, width, height):
+        super().__init__(x, y, width, height, "chain")
+        self.x_vel = 0
+        self.chain = load_sprite_sheets("Traps", "Saw", width, height)
+        self.image = self.chain["off"][0]
+        self.mask = pygame.mask.from_surface(self.image)
+        self.animation_count = 0
+        self.animation_name = "off"
+
+    def on(self):
+        self.animation_name = "on"
+
+    def off(self):
+        self.animation_name = "off"
+    
+    def loop(self):
+        sprites = self.chain[self.animation_name]
+        sprite_index = (self.animation_count // 
+                        self.ANIMATION_DELAY) % len(sprites)
+        self.image = sprites[sprite_index]
+        self.animation_count += 1
+
+        self.rect = self.image.get_rect(topleft=(self.rect.x, self.rect.y))
+        self.mask = pygame.mask.from_surface(self.image)
+
+        if self.animation_count // self.ANIMATION_DELAY > len(sprites):
+            self.animation_count = 0
+
+        if self.rect.x < 450 and self.x_vel != -1:
+            self.x_vel = 1
+        elif self.rect.x >= 661:
+            self.x_vel = -1
+        elif self.rect.x < 450:
+            self.x_vel = 1
+        
+        self.rect.x += self.x_vel
+
+class Flag(Object):
+    ANIMATION_DELAY = 3
+    
+    def __init__(self, x, y, width, height):
+        super().__init__(x, y, width, height, "flag")
+        self.flag = load_items("Items", "Checkpoints", "Checkpoint", width, height)
+        self.image = self.flag["Checkpoint (Flag Idle)(64x64)"][0]
+        self.mask = pygame.mask.from_surface(self.image)
+        self.animation_count = 0
+        self.animation_name = "Checkpoint (Flag Idle)(64x64)"
+
+    def available(self):
+        self.animation_name = "Checkpoint (Flag Idle)(64x64)"
+
+    def collected(self):
+        collected_sound = pygame.mixer.Sound('coin.wav')
+        collected_sound.play()
+        self.animation_name = "Checkpoint (Flag Out) (64x64)"
+    
+    def loop(self):
+        sprites = self.flag[self.animation_name]
+        sprite_index = (self.animation_count // 
+                        self.ANIMATION_DELAY) % len(sprites)
+        self.image = sprites[sprite_index]
+        self.animation_count += 1
+
+        self.rect = self.image.get_rect(topleft=(self.rect.x, self.rect.y))
+        self.mask = pygame.mask.from_surface(self.image)
+
+        if self.animation_count // self.ANIMATION_DELAY > len(sprites):
+            self.animation_count = 0
+
+
+class Block(Object):
+    def __init__(self, x, y, size):
+        super().__init__(x, y, size, size)
+        block = get_block(size)
+        self.image.blit(block, (0, 0))
+        self.mask = pygame.mask.from_surface(self.image)
 
 
 def get_background(name):
@@ -258,7 +427,7 @@ def collide(player, objects, dx):
     return collided_object
 
 
-def handle_move(player, objects):
+def handle_move(player, objects, platform, flag):
     keys = pygame.key.get_pressed()
     
     player.x_vel = 0
@@ -276,10 +445,22 @@ def handle_move(player, objects):
 
     vertical_collide = handle_vertical_collision(player, objects, player.y_vel)
     to_check = [collide_left, collide_right, *vertical_collide]
+    
     for obj in to_check:
+        global player_health
         if obj and obj.name == "fire":
+            player_health -= 1
             player.make_hit()
-
+        elif obj and obj.name == "spikes":
+            player_health -= 1
+            player.make_hit()
+        elif obj and obj.name == "platform":
+            player.rect.x = platform.rect.x
+        elif obj and obj.name == "chain":
+            player_health -= 1
+            player.make_hit()
+        elif obj and obj.name == "flag":
+            flag.collected()
 
 def main(window):
     clock = pygame.time.Clock()
@@ -287,19 +468,37 @@ def main(window):
 
     block_size = 96
 
-    player = Player(100, 100, 50, 50)
+    player = Player(700, 100, 50, 50)
     fire = Fire(100, HEIGHT - block_size - 64, 16, 32)
+    fire2 = Fire(416, HEIGHT - block_size - 350, 16, 32)
+    spikes = Spikes(800, HEIGHT - block_size - 32, 24, 16)
+    platform = Platform(block_size * 3 + 288, HEIGHT - block_size * 4, 32, 10)
+    chain = Chain(446, HEIGHT - block_size - 75, 38, 38)
+    flag = Flag(450, HEIGHT - block_size - 415, 64, 64)
     fire.on()
+    fire2.on()
+    platform.on()
+    flag.available()
+    chain.on()
     floor = [Block(i * block_size, HEIGHT - block_size, block_size) 
              for i in range(-WIDTH // block_size, WIDTH * 2 // block_size)]
     objects = [*floor, Block(0, HEIGHT - block_size * 2, block_size),
-               Block(block_size * 3, HEIGHT - block_size * 4, block_size), fire]
+               Block(block_size * 3, HEIGHT - block_size * 4, block_size), 
+               Block(block_size * 3 + 96, HEIGHT - block_size * 4, block_size), 
+               Block(block_size * 3 + 192, HEIGHT - block_size * 4, block_size), 
+               Block(-96, HEIGHT - block_size * 2, block_size), 
+               Block(-96, HEIGHT - block_size * 3, block_size), 
+               Block(-96, HEIGHT - block_size * 4, block_size), 
+               Block(-96, HEIGHT - block_size * 5, block_size), 
+               Block(-96, HEIGHT - block_size * 6, block_size), 
+               Block(-96, HEIGHT - block_size * 7, block_size), 
+               Block(-96, HEIGHT - block_size * 8, block_size), fire, fire2, spikes, platform, chain, flag]
 
     offset_x = 0
     scroll_area_width = 200
 
     run = True
-    while run:
+    while run and player_health > 0:
         clock.tick(FPS)
     
         for event in pygame.event.get():
@@ -323,16 +522,23 @@ def main(window):
         
         player.loop(FPS)
         fire.loop()
-        handle_move(player, objects)
+        fire2.loop()
+        platform.loop()
+        chain.loop()
+        flag.loop()
+        handle_move(player, objects, platform, flag)
         draw(window, background, bg_image, player, objects, offset_x)
 
         if ((player.rect.right - offset_x  >= WIDTH - scroll_area_width) and player.x_vel > 0) or (
             (player.rect.left - offset_x  <= scroll_area_width) and player.x_vel < 0):
             offset_x += player.x_vel
-
+    
     pygame.quit()
+    print("You died. Game over.")
     quit()
+
 
 
 if __name__ == "__main__":
     main(window)
+
