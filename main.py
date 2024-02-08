@@ -16,8 +16,26 @@ FPS = 60
 PLAYER_VEL = 5
 
 player_health = 5
+score = 0
 
 window = pygame.display.set_mode((WIDTH, HEIGHT))
+
+black = (0, 0, 0)
+
+def show_text(msg, color, x=WIDTH//2, y=WIDTH//2):
+    global window
+    text = font.render(msg, True, color)
+    window.blit(text, (x, y))
+
+def show_score(msg, color, x=0, y=100):
+    global window
+    text = font.render(msg, True, color)
+    window.blit(text, (x, y))
+
+font = pygame.font.SysFont(None, 25)
+
+show_text("This is a message!", black)
+pygame.display.update()
 
 pygame.mixer.music.load("Roa - Pixel Story.mp3")
 pygame.mixer.music.play(-1)
@@ -121,8 +139,6 @@ class Player(pygame.sprite.Sprite):
         hit_sound.play()
         self.hit = True
         self.hit_count = 0
-        global player_health
-        #player_health -= 1
 
     def move_left(self, vel):
         self.x_vel = -vel
@@ -384,6 +400,11 @@ def get_background(name):
 
     return tiles, image
 
+def update_score():
+    if player_health > 0:
+        global score
+        score += 1
+
 
 def draw(window, background, bg_image, player, objects, offset_x):
     for tile in background:
@@ -426,6 +447,12 @@ def collide(player, objects, dx):
     player.update()
     return collided_object
 
+def reset_values():
+    global score
+    global player_health
+    score = 0
+    player_health = 5
+
 
 def handle_move(player, objects, platform, flag):
     keys = pygame.key.get_pressed()
@@ -461,8 +488,12 @@ def handle_move(player, objects, platform, flag):
             player.make_hit()
         elif obj and obj.name == "flag":
             flag.collected()
+            update_score()
 
 def main(window):
+    global player_health
+    global score
+    reset = 0
     clock = pygame.time.Clock()
     background, bg_image = get_background("Blue.png")
 
@@ -498,8 +529,15 @@ def main(window):
     scroll_area_width = 200
 
     run = True
-    while run and player_health > 0:
+    while run:
         clock.tick(FPS)
+        
+        if player_health <= 0:
+            show_text("Game Over! Press p to play again.", black)
+            pygame.display.update()
+        
+        show_score("Score: " + str(score), black)
+        pygame.display.update()
     
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -519,6 +557,10 @@ def main(window):
                     player.SPRITES = load_sprite_sheets("MainCharacters", "PinkMan", 32, 32, True)
                 elif event.key == pygame.K_4:
                     player.SPRITES = load_sprite_sheets("MainCharacters", "VirtualGuy", 32, 32, True)
+                elif event.key == pygame.K_p:
+                    reset_values()
+                    main(window)
+
         
         player.loop(FPS)
         fire.loop()
@@ -534,11 +576,8 @@ def main(window):
             offset_x += player.x_vel
     
     pygame.quit()
-    print("You died. Game over.")
     quit()
-
 
 
 if __name__ == "__main__":
     main(window)
-
